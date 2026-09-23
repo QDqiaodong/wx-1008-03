@@ -41,9 +41,15 @@ request.interceptors.response.use(
         return Promise.reject(new Error(parsed.message || '导出失败'))
       } catch { /* fall through */ }
     }
-    const res = error.response?.data as { message?: string } | undefined
+    const res = error.response?.data as { message?: string; data?: unknown } | undefined
     if (res?.message) {
-      return Promise.reject(new Error(res.message))
+      // 事件版本冲突 409：携带结构化 payload（冲突字段 + 最新事件）
+      const err = new Error(res.message) as Error & { conflict?: unknown; status?: number }
+      if (error.response?.status === 409 && res.data) {
+        err.conflict = res.data
+      }
+      err.status = error.response?.status
+      return Promise.reject(err)
     }
     return Promise.reject(error)
   }
@@ -480,4 +486,235 @@ export const watchApi = {
 export interface FlightWatchEntity {
   id: number
   status: WatchStatus
+}
+
+/* ==================== 飞行异常事件复盘 ==================== */
+
+export type IncidentStatus = 'DRAFT' | 'INVESTIGATING' | 'PENDING_SEAL' | 'SEALED' | 'REOPENED'
+export type IncidentSeverity = 'MINOR' | 'MAJOR' | 'CRITICAL'
+
+/** 事件整份正文——修订记录 before/after 也是这个结构（后端存 JSON 原文） */
+export interface IncidentContent {
+  title: string
+  severity: IncidentSeverity
+  /** ISO 本地时间 2026-09-23T14:30:00 */
+  foundTime: string
+  sceneNarrative: string | null
+  handlingActions: string | null
+  evidenceNote: string | null
+  causeConclusion: string | null
+  correctiveAction: string | null
+  ownerId: number | null
+  dueDate: string | null
+}
+
+export interface IncidentCreateDTO {
+  title: string
+  severity: IncidentSeverity
+  foundTime: string
+  routeId: number
+  watchId?: number | null
+  anchorIds?: number[]
+  involvedStaffIds?: number[]
+  sceneNarrative?: string
+  handlingActions?: string
+  evidenceNote?: string
+  causeConclusion?: string
+  correctiveAction?: string
+  ownerId?: number | null
+  dueDate?: string | null
+}
+
+export interface IncidentEditDTO {
+  expectedVersion: number
+  reason?: string
+  content: IncidentContent
+}
+
+export interface IncidentTransitionDTO {
+  expectedVersion: number
+  basis?: string
+}
+
+export interface IncidentAnchorView {
+  anchorId: number
+  anchorCode: string
+  locationDesc: string | null
+  anchorZone: string | null
+  anchorStatus: number | null
+  anchorStatusLabel: string
+  maxWeight: number | null
+  minWindSpeed: number | null
+  maxWindSpeed: number | null
+  currentExists: boolean
+  currentAnchorCode?: string
+  currentLocationDesc?: string | null
+  currentAnchorZone?: string | null
+  currentAnchorStatus?: number | null
+  currentAnchorStatusLabel?: string
+  currentMaxWeight?: number | null
+  currentMinWindSpeed?: number | null
+  currentMaxWindSpeed?: number | null
+  diffFields: string[]
+}
+
+export interface IncidentRevisionView {
+  id: number
+  seq: number
+  revisionType: string
+  revisionTypeLabel: string
+  fromStatus: string | null
+  fromStatusLabel: string | null
+  toStatus: string | null
+  toStatusLabel: string | null
+  operatorId: number
+  operatorName: string
+  operatorRole: string
+  operatorRoleLabel: string
+  reason: string | null
+  beforeContent: string | null
+  afterContent: string | null
+  changedFields: string[]
+  sealRound: number
+  operateTime: string
+}
+
+export interface IncidentSealRoundView {
+  roundNo: number
+  sealTime: string
+  sealedById: number
+  sealedByName: string
+  sealedVersion: number
+  reopenTime: string | null
+  reopenedById: number | null
+  reopenedByName: string | null
+  reopenBasis: string | null
+  reopenVersion: number | null
+  reopened: boolean
+}
+
+export interface IncidentView {
+  id: number
+  incidentCode: string
+  title: string
+  status: IncidentStatus
+  statusLabel: string
+  version: number
+  severity: IncidentSeverity
+  severityLabel: string
+  foundTime: string
+  sceneNarrative: string | null
+  handlingActions: string | null
+  evidenceNote: string | null
+  causeConclusion: string | null
+  correctiveAction: string | null
+  ownerId: number | null
+  ownerName: string | null
+  dueDate: string | null
+
+  routeId: number
+  snapRouteCode: string
+  snapRouteName: string
+  snapRouteWindLevel: string | null
+  snapRouteWindSpeed: number | null
+  currentRouteExists: boolean
+  currentRouteCode?: string
+  currentRouteName?: string
+  currentRouteWindLevel?: string | null
+  currentRouteWindSpeed?: number | null
+  currentRouteStatus?: number
+  routeDiffFields: string[]
+
+  watchId: number | null
+  snapWatchTakeoff: string | null
+  snapWatchEnd: string | null
+  snapWatchOperatorId: number | null
+  snapWatchOperatorName: string | null
+  snapWatchReviewerId: number | null
+  snapWatchReviewerName: string | null
+  currentWatchExists: boolean
+  currentWatchStatus?: string
+  currentWatchStatusLabel?: string
+  currentWatchOperatorName?: string | null
+  currentWatchReviewerName?: string | null
+  watchDiffFields: string[]
+
+  anchorSnapshots: IncidentAnchorView[]
+
+  reporterId: number
+  reporterName: string
+  involvedStaffIds: number[]
+  involvedStaffNames: string | null
+
+  currentSealRound: number
+  revisions: IncidentRevisionView[]
+  sealRounds: IncidentSealRoundView[]
+
+  canEditContent: boolean
+  canEnterInvestigating: boolean
+  canRequestSeal: boolean
+  canBackToInvestigating: boolean
+  canSeal: boolean
+  canReopen: boolean
+  sealed: boolean
+
+  createTime: string
+  updateTime: string
+  policy: string
+  rejectedAlternative: string
+}
+
+export interface IncidentListItem {
+  id: number
+  incidentCode: string
+  title: string
+  status: IncidentStatus
+  statusLabel: string
+  version: number
+  severity: IncidentSeverity
+  severityLabel: string
+  foundTime: string
+  snapRouteCode: string
+  snapRouteName: string
+  snapRouteWindLevel: string | null
+  reporterName: string
+  involvedStaffNames: string | null
+  currentSealRound: number
+  revisionCount: number
+  createTime: string
+  updateTime: string
+}
+
+/** 409 冲突响应 data */
+export interface IncidentConflict {
+  incidentId: number
+  incidentCode: string
+  expectedVersion: number
+  latestVersion: number
+  latestStatus: IncidentStatus
+  latestStatusLabel: string
+  conflictFields: string[]
+  latest: IncidentView
+}
+
+export interface ApiError extends Error {
+  conflict?: IncidentConflict
+  status?: number
+}
+
+export const incidentApi = {
+  list: () => get<IncidentListItem[]>('/incident'),
+  get: (id: number) => get<IncidentView>(`/incident/${id}`),
+  create: (data: IncidentCreateDTO) => post<IncidentView>('/incident', data),
+  edit: (id: number, data: IncidentEditDTO) => post<IncidentView>(`/incident/${id}/edit`, data),
+  enterInvestigating: (id: number, data: IncidentTransitionDTO) =>
+    post<IncidentView>(`/incident/${id}/enter-investigating`, data),
+  requestSeal: (id: number, data: IncidentTransitionDTO) =>
+    post<IncidentView>(`/incident/${id}/request-seal`, data),
+  backInvestigating: (id: number, data: IncidentTransitionDTO) =>
+    post<IncidentView>(`/incident/${id}/back-investigating`, data),
+  seal: (id: number, data: IncidentTransitionDTO) =>
+    post<IncidentView>(`/incident/${id}/seal`, data),
+  reopen: (id: number, data: IncidentTransitionDTO) =>
+    post<IncidentView>(`/incident/${id}/reopen`, data)
 }
