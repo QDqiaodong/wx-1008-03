@@ -249,7 +249,7 @@ CREATE TABLE IF NOT EXISTS incident_seal_round (
     sealed_by_id BIGINT NOT NULL COMMENT '封存人ID(安全主管)',
     sealed_by_name VARCHAR(50) NOT NULL COMMENT '封存人姓名',
     sealed_version BIGINT NOT NULL COMMENT '封存时事件版本号',
-    reopen_time DATETIME COMMENT COMMENT '本轮封存被重新开启时间(NULL=仍封存)',
+    reopen_time DATETIME COMMENT '本轮封存被重新开启时间(NULL=仍封存)',
     reopened_by_id BIGINT COMMENT '重新开启人ID',
     reopened_by_name VARCHAR(50) COMMENT '重新开启人姓名',
     reopen_basis VARCHAR(1000) COMMENT '重新开启依据',
