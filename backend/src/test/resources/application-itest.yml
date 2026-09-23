@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:px_itest;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  sql:
+    init:
+      mode: never
+  # 集成测试不连真实 Redis：由测试内 RedisStubConfig 提供深桩 RedisTemplate
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6399
+
+logging:
+  level:
+    com.px.base: WARN
