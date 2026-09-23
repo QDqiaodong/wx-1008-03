@@ -44,6 +44,22 @@ public class GlobalExceptionHandler {
                 .body(ResponseDTO.error(409, e.getMessage()));
     }
 
+    /**
+     * 事件整份版本冲突：409，且 data 内带结构化冲突字段与最新版本正文，
+     * 前端据此展示“你的值 vs 最新值”并可直接基于最新内容重新编辑。
+     */
+    @ExceptionHandler(com.px.base.incident.dto.IncidentVersionConflictException.class)
+    public ResponseEntity<ResponseDTO<Object>> handleIncidentConflict(
+            com.px.base.incident.dto.IncidentVersionConflictException e) {
+        log.warn("事件版本冲突被拒绝: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ResponseDTO.<Object>builder()
+                        .code(409)
+                        .message(e.getMessage())
+                        .data(e.getConflict())
+                        .build());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResponseDTO<Void>> handleOther(Exception e) {
         log.error("系统异常", e);

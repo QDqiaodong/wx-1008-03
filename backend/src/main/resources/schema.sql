@@ -154,3 +154,94 @@ CREATE TABLE IF NOT EXISTS flight_watch (
     INDEX idx_watch_operator (operator_id),
     INDEX idx_watch_reviewer (reviewer_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开航值守安排表';
+
+-- ==================== 飞行异常事件复盘 ====================
+-- 口径：整份事件版本冲突（乐观锁）。incident.version 每产生一次修订 +1，
+-- 编辑必须携带所依据的 expectedVersion，不一致返回 409 与冲突字段，绝不静默覆盖。
+-- 修订只追加（incident_revision），永不更新/删除；状态变更与修订插入同一事务。
+
+CREATE TABLE IF NOT EXISTS incident (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    incident_no VARCHAR(50) UNIQUE NOT NULL COMMENT '事件编号',
+    title VARCHAR(200) NOT NULL COMMENT '事件标题',
+    watch_id BIGINT COMMENT '关联值守安排ID',
+    route_id BIGINT NOT NULL COMMENT '关联航线ID(仅跳转当前资料用)',
+    found_time DATETIME NOT NULL COMMENT '异常发现时间',
+    severity VARCHAR(20) NOT NULL COMMENT '严重级别:MINOR-一般/MAJOR-较大/CRITICAL-严重',
+    incident_note VARCHAR(4000) NOT NULL COMMENT '现场经过',
+    handling_action VARCHAR(4000) COMMENT '处置动作',
+    evidence_desc VARCHAR(2000) COMMENT '证据说明',
+    root_cause VARCHAR(4000) COMMENT '原因结论(封存前必填)',
+    corrective_action VARCHAR(4000) COMMENT '纠正措施(封存前必填)',
+    owner_id BIGINT COMMENT '整改负责人ID(封存前必填)',
+    owner_name VARCHAR(50) COMMENT '整改负责人姓名(冗余)',
+    due_date DATE COMMENT '整改期限(封存前必填)',
+    reporter_id BIGINT NOT NULL COMMENT '报告人ID',
+    reporter_name VARCHAR(50) NOT NULL COMMENT '报告人姓名(建事件时冻结)',
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/INVESTIGATING/PENDING_SEAL/SEALED/REOPENED',
+    version INT NOT NULL DEFAULT 1 COMMENT '乐观锁版本：每次修订+1，编辑必须携带expectedVersion',
+    sealed_count INT NOT NULL DEFAULT 0 COMMENT '封存次数(区分首次封存与重新开启后的再次封存)',
+    current_revision_id BIGINT COMMENT '当前正文对应的修订版本ID',
+    first_seal_time DATETIME COMMENT '首次封存时间',
+    last_seal_time DATETIME COMMENT '最近一次封存时间',
+    sealed_by_id BIGINT COMMENT '最近封存人ID',
+    sealed_by_name VARCHAR(50) COMMENT '最近封存人姓名',
+    snapshot_route_code VARCHAR(50) COMMENT '快照-事发航线编号',
+    snapshot_route_name VARCHAR(100) COMMENT '快照-事发航线名称',
+    snapshot_route_wind_level VARCHAR(20) COMMENT '快照-事发航线风级',
+    snapshot_route_group VARCHAR(50) COMMENT '快照-事发航线分组',
+    snapshot_watch_flight_date VARCHAR(20) COMMENT '快照-值守飞行日',
+    snapshot_watch_takeoff VARCHAR(30) COMMENT '快照-值守预计起飞时刻',
+    snapshot_operator_name VARCHAR(50) COMMENT '快照-值守操作员姓名(事发时)',
+    snapshot_reviewer_name VARCHAR(50) COMMENT '快照-值守复核员姓名(事发时)',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_incident_watch (watch_id),
+    INDEX idx_incident_route (route_id),
+    INDEX idx_incident_reporter (reporter_id),
+    INDEX idx_incident_owner (owner_id),
+    INDEX idx_incident_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='飞行异常事件主表';
+
+-- 事件关联锚点（多对多快照行：锚点关键状态在建事件时冻结）
+CREATE TABLE IF NOT EXISTS incident_anchor (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    incident_id BIGINT NOT NULL COMMENT '事件ID',
+    anchor_id BIGINT NOT NULL COMMENT '锚点ID(仅跳转当前资料用)',
+    anchor_code VARCHAR(50) NOT NULL COMMENT '锚点编号(快照)',
+    location_desc VARCHAR(200) COMMENT '位置描述(快照)',
+    anchor_zone VARCHAR(50) COMMENT '所属区域(快照)',
+    status_snapshot VARCHAR(20) NOT NULL COMMENT '事发时锚点状态:启用/停用(快照)',
+    max_weight DECIMAL(10,2) COMMENT '事发时最大承重(快照)',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_ia_incident (incident_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='事件关联锚点快照表';
+
+-- 不可变修订流水：只追加。封存后正文/原证据不能覆盖，更正只能新增带理由的修订。
+CREATE TABLE IF NOT EXISTS incident_revision (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    incident_id BIGINT NOT NULL COMMENT '事件ID',
+    revision_no INT NOT NULL COMMENT '版本序号(从1起，与incident.version一致)',
+    change_type VARCHAR(30) NOT NULL COMMENT 'CREATE/EDIT/SEAL/CORRECTION/REOPEN',
+    change_reason VARCHAR(1000) COMMENT '修订理由(封存后更正与重新开启必填)',
+    -- 该版本完整正文（before/after 由相邻两行天然构成，行本身不可变）
+    title VARCHAR(200) NOT NULL,
+    found_time DATETIME NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    incident_note VARCHAR(4000) NOT NULL,
+    handling_action VARCHAR(4000),
+    evidence_desc VARCHAR(2000),
+    root_cause VARCHAR(4000),
+    corrective_action VARCHAR(4000),
+    owner_id BIGINT,
+    owner_name VARCHAR(50),
+    due_date DATE,
+    status_before VARCHAR(20) COMMENT '修订前状态',
+    status_after VARCHAR(20) COMMENT '修订后状态',
+    operator_id BIGINT NOT NULL COMMENT '操作者ID',
+    operator_name VARCHAR(50) NOT NULL COMMENT '操作者姓名',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '修订时间',
+    UNIQUE KEY uk_rev_incident_no (incident_id, revision_no),
+    INDEX idx_rev_incident (incident_id),
+    INDEX idx_rev_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='事件不可变修订流水表';

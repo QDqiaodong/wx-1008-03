@@ -12,6 +12,7 @@ const menuItems = [
   { path: '/ground', label: '地勤资质' },
   { path: '/watch', label: '开航值守' },
   { path: '/route-entry', label: '航线入口' },
+  { path: '/incidents', label: '异常事件复盘' },
   { path: '/logs', label: '流水记录' }
 ]
 
